@@ -164,6 +164,7 @@ def wavelength_to_wavenumber(wavelength_ranges):
     :param wavelength_range: (list[tuple]) list of wavelength range.
     :return: wavenumber_range (list[tuple]) list of wavnumber range.
     """
+
     if any(n <= 0 for rng in wavelength_ranges for n in rng):
         raise ValueError("Negative or zero wavelengths are not permitted.")
     return [(1e4 / rng[1], 1e4 / rng[0]) for rng in wavelength_ranges]
