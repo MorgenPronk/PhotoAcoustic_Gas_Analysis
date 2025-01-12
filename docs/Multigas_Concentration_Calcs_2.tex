@@ -1,0 +1,109 @@
+\documentclass[12pt]{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{siunitx}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\begin{document}
+
+\title{Derivation of the Photoacoustic Effect Equation and Application of HITRAN Data}
+\author{}
+\date{}
+\maketitle
+
+\section{The Photoacoustic Effect and Beer–Lambert Law}
+The photoacoustic effect is driven by the absorption of light in a gas, leading to localized heating, thermal expansion, and the generation of pressure waves. The key equation for the photoacoustic pressure \( p(t) \) is derived from the Beer–Lambert Law and heat transfer principles. 
+
+\subsection{The Beer–Lambert Law}
+The Beer–Lambert Law describes the attenuation of light as it passes through an absorbing medium:
+\[
+A = \varepsilon \cdot C \cdot L,
+\]
+where:
+\begin{itemize}
+    \item \( A = \ln\left(\frac{I_0}{I}\right) \): Absorbance (dimensionless),
+    \item \( \varepsilon \): Molar absorptivity (\si{\liter\per\mole\per\centi\meter}),
+    \item \( C \): Concentration of the absorbing species (\si{\mole\per\liter}),
+    \item \( L \): Path length (\si{\centi\meter}),
+    \item \( I_0 \): Incident light intensity (\si{\watt\per\meter\squared}),
+    \item \( I \): Transmitted light intensity (\si{\watt\per\meter\squared}).
+\end{itemize}
+
+Rearranging for transmittance (\( T = I/I_0 \)):
+\[
+T = e^{-\varepsilon C L}.
+\]
+The fraction of absorbed light is:
+\[
+1 - T = 1 - e^{-\varepsilon C L}.
+\]
+
+\subsection{Light Absorption and Pressure Generation}
+The absorbed light energy drives the photoacoustic signal. The pressure amplitude \( p(t) \) is given by:
+\[
+p(t) = \frac{\beta_{\text{mixture}} \cdot \rho_{\text{mixture}}}{C_{p,\text{mixture}}} \cdot \int I_0(\lambda) \left( 1 - e^{-\sum_i \varepsilon_i(\lambda) C_i L} \right) d\lambda \cdot \cos(\omega t),
+\]
+where:
+\begin{itemize}
+    \item \( \beta_{\text{mixture}} \): Thermal expansion coefficient (\si{\per\kelvin}),
+    \item \( \rho_{\text{mixture}} \): Gas density (\si{\kilogram\per\meter\cubed}),
+    \item \( C_{p,\text{mixture}} \): Heat capacity (\si{\joule\per\kilogram\per\kelvin}),
+    \item \( I_0(\lambda) \): Incident light intensity at wavelength \(\lambda\) (\si{\watt\per\meter\squared\per\nano\meter}),
+    \item \( \varepsilon_i(\lambda) \): Molar absorptivity for species \( i \) at \(\lambda\) (\si{\liter\per\mole\per\centi\meter}),
+    \item \( C_i \): Concentration of species \( i \) (\si{\mole\per\liter}),
+    \item \( L \): Path length (\si{\centi\meter}),
+    \item \( \omega \): Modulation angular frequency (\si{\radian\per\second}).
+\end{itemize}
+
+The absorbed energy per unit volume is proportional to \( \int I_0(\lambda) \left( 1 - e^{-\sum_i \varepsilon_i(\lambda) C_i L} \right) d\lambda \). This energy causes heating, thermal expansion, and pressure oscillations.
+
+\subsection{Units Consistency Check}
+The terms in the pressure equation have the following units:
+\[
+\frac{\beta_{\text{mixture}} \cdot \rho_{\text{mixture}}}{C_{p,\text{mixture}}}: \frac{\si{\per\kelvin} \cdot \si{\kilogram\per\meter\cubed}}{\si{\joule\per\kilogram\per\kelvin}} = \si{\pascal\per\watt\per\meter\squared}.
+\]
+\[
+\int I_0(\lambda) \left( 1 - e^{-\sum_i \varepsilon_i(\lambda) C_i L} \right) d\lambda: \si{\watt\per\meter\squared}.
+\]
+Combining terms:
+\[
+\text{Pressure } p(t): \si{\pascal}.
+\]
+
+\section{HITRAN Data and Molar Absorptivity Calculation}
+The HITRAN database provides parameters for spectral lines. The key parameters used to calculate molar absorptivity (\( \varepsilon(\lambda) \)) are:
+
+\subsection{Absorption Cross-Section}
+The absorption cross-section \( \sigma(\tilde{\nu}) \) is:
+\[
+\sigma(\tilde{\nu}) = S \cdot V(\tilde{\nu}),
+\]
+where \( V(\tilde{\nu}) \) is the Voigt profile, which combines Doppler and pressure broadening.
+
+\subsection{Molar Absorptivity}
+The molar absorptivity is related to the cross-section by:
+\[
+\varepsilon(\lambda) = \frac{\sigma(\tilde{\nu}) \cdot N_A}{\ln(10)},
+\]
+where \( N_A \) is Avogadro's number (\(\si{\molecule\per\mole}\)).
+
+\section{Determining Concentrations Using a Nonlinear Solver}
+To determine concentrations \( C_i \), the photoacoustic equation is expressed as:
+\[
+p_{\text{measured}} = \frac{\beta_{\text{mixture}} \cdot \rho_{\text{mixture}}}{C_{p,\text{mixture}}} \cdot \int I_0(\lambda) \left( 1 - e^{-\sum_i \varepsilon_i(\lambda) C_i L} \right) d\lambda.
+\]
+Given:
+\begin{itemize}
+    \item \( p_{\text{measured}} \): Experimental pressure values,
+    \item \( \varepsilon_i(\lambda) \): Pre-calculated from HITRAN data,
+    \item \( I_0(\lambda) \), \( \beta_{\text{mixture}} \), \( \rho_{\text{mixture}} \), and \( C_{p,\text{mixture}} \): Known constants,
+\end{itemize}
+we solve for \( C_i \) using a nonlinear optimization method such as Levenberg–Marquardt or gradient descent.
+
+The objective function minimizes the difference between measured and calculated pressure:
+\[
+\text{Objective: } \min_{C_i} \left| p_{\text{measured}} - p_{\text{calculated}}(C_i) \right|.
+\]
+
+\end{document}

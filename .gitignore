@@ -1,0 +1,52 @@
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+
+# Environment files
+*.env
+*.venv
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE-specific files
+.idea/
+.vscode/
+*.iml
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Data and output files (optional, if not version-controlled)
+data/outputs/*.csv
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Test coverage reports
+coverage/
+*.cover
+.hypothesis/
+
+# PyCharm files
+.idea/
+*.iml
+workspace.xml
+
+# Don't put the data on git because it is too large
+data/
