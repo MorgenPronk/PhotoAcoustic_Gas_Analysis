@@ -1,19 +1,20 @@
 ## forwardpass.py
 
 import torch
-import numpy as np
+# import numpy as np
 import pandas as pd
 from src.data_processing.parse_hitran import *
+from src.data_processing.hitran_partition_sums import compute_partition_function_ratio
 
 # TODO: Light_source_range might be good if it could take wavelength values or wavenumber
 # TODO: Make it generic so it can get integrate with getting data from a database and not a file or directory
-def load_hitran_data(species, light_source_range, intensity_threshold=1e-20, buffers=5):
+def load_hitran_data(species, light_source_ranges, intensity_threshold=1e-20, buffers=5):
     """
     Load HITRAN data for a given species based on light source parameters. Only loads areas near the light source for
     efficiency.
 
     :param species: Name of the species (e.g., 'CO2', 'CH4').
-    :param light_source_range: tuple specifying the range of the light source. e.g (min, max).
+    :param light_source_ranges: list of tuples specifying the ranges of the light sources. e.g (min, max).
         **THIS IS CURRENTLY IN WAVELENGTH (microns)**
     :param intensity_threshold: Minimum line intensity to include.
     :param buffers: Extra range to account for line broadening.
@@ -23,33 +24,78 @@ def load_hitran_data(species, light_source_range, intensity_threshold=1e-20, buf
     # Parse and filter HITRAN data
     try:
         file_base = f'../../data/HITRAN/{species}'  # If running it from the project folder the file base is likely './data/HITRAN/C2H2'
-        wavenumber_range = wavelength_to_wavenumber(light_source_range)
-        filtered_data = parse_hitran(file_base, wavenumber_range, intensity_threshold, buffers)
+        wavenumber_ranges = wavelength_to_wavenumber(light_source_ranges)
+        filtered_data = parse_hitran(file_base, wavenumber_ranges, intensity_threshold, buffers)
         return filtered_data
     except Exception as e:
         print(f"An error occurred: {e}")
         traceback.print_exc()
 
-def compute_absorptivity(hitran_data, concentrations, light_source, pressure=1.0, temperature=296):
+
+from src.data_processing.hitran_partition_sums import compute_partition_function_ratio
+
+def compute_absorptivity(hitran_data, concentrations, light_source, pressure=1.0, temperature=296, T_ref=296):
     """
-    Compute the total absorptivity for the mixture.
+    Compute the total absorptivity for the mixture with temperature correction.
 
     :param hitran_data: Dict of {species: pd.DataFrame} with HITRAN data.
     :param concentrations: Dict of {species: concentration} (mol/L).
     :param light_source: Dict with light source properties (wavelength range, intensity).
     :param pressure: Total pressure (atm).
     :param temperature: Temperature (K).
+    :param T_ref: Reference temperature (K). Default is 296 K.
     :return: torch.Tensor of total absorptivity across wavelengths.
     """
+    c2 = 1.4388  # Second radiation constant in cm K
     wavelengths = light_source['wavelengths']
-    absorptivity = torch.zeros_like(wavelengths)  # Placeholder for actual computation
+    wavenumbers = 1e4 / wavelengths  # Convert wavelengths (microns) to wavenumbers (cm^-1)
+
+    absorptivity = torch.zeros_like(wavenumbers)
 
     for gas, data in hitran_data.items():
-        # Compute gas-specific contributions to absorptivity
-        # TODO: Implement actual absorptivity calculations based on HITRAN data
-        pass
+        concentration = concentrations[gas]
+        try:
+            # HITRAN columns
+            nu = torch.tensor(data['nu'].values, dtype=torch.float32)  # Wavenumbers
+            S_ref = torch.tensor(data['sw'].values, dtype=torch.float32)  # Line intensities at T_ref
+            E_l = torch.tensor(data['elower'].values, dtype=torch.float32)  # Lower state energy
+            gamma_air = torch.tensor(data['gamma_air'].values, dtype=torch.float32)
+            gamma_self = torch.tensor(data['gamma_self'].values, dtype=torch.float32)
+
+            # Molecule and isotopologue IDs
+            molec_id = str(data['molec_id'].iloc[0])
+            iso_id = str(data['local_iso_id'].iloc[0])
+
+            # Compute Q(T_ref)/Q(T) using the partition sum logic
+            Q_ratio = compute_partition_function_ratio(
+                molecule_id=molec_id,
+                isotopologue_id=iso_id,
+                temperature=temperature,
+                reference_temperature=T_ref,
+                qtpy_dir='..\\..\\data\\TIPS2021\\QTpy'
+            )
+
+            # Temperature correction for line intensity
+            T_correction = (
+                torch.exp(-c2 * E_l / temperature) / torch.exp(-c2 * E_l / T_ref)
+            ) * (
+                (1 - torch.exp(-c2 * nu / temperature)) / (1 - torch.exp(-c2 * nu / T_ref))
+            )
+            S = S_ref * Q_ratio * T_correction
+
+            # Broadening and line shape
+            gamma = gamma_air * (1 - concentration) + gamma_self * concentration
+            for i, nu_center in enumerate(nu):
+                f = (gamma[i] / ((wavenumbers - nu_center) ** 2 + gamma[i] ** 2)) / torch.pi
+                absorptivity += S[i] * f * concentration
+
+        except KeyError as e:
+            print(f"Missing expected column in HITRAN data for {gas}: {e}")
+            continue
 
     return absorptivity
+
+
 
 
 def calculate_pressure_signal(absorptivity, light_source, environmental_params):
@@ -116,18 +162,28 @@ def forward_pass(concentrations, gases, light_sources, measured_voltages, pressu
         raise ValueError("Number of light sources must match the number of voltage measurements.")
 
     # Step 1: Load HITRAN data for each gas
+    # hitran_data is going to be structured like:
+    #  {"gas_formula": pd.DataFrame_filtered_data_join_of_lightsources, ... }
     hitran_data = {}
     for i, gas in enumerate(gases):
         try:
-            wavenumber_ranges = max_and_min(light_sources[i]['wavelengths'])
+            # For each gas, we need to find the data that overlaps with each lightsource
+            # light_source_ranges is going to be the list of min - max tuples that represent the range for each light
+            #  source. The parse_hitran() function used by load_hitran_data() expects a list of tuples anyways.
+            light_source_ranges = []
+            for light_source in light_sources:
+                wavenumber_min_max_tuple = max_and_min(light_source['wavelengths'])
+                light_source_ranges.append(wavenumber_min_max_tuple)
             hitran_data[gas] = load_hitran_data(
-                gas, [wavenumber_ranges],
+                gas, light_source_ranges,
                 light_sources[i]['threshold'],
                 light_sources[i]['buffers']
             )
         except Exception as e:
             print(f"Error loading HITRAN data for gas {gas}: {e}")
             continue
+    #print(f"hitran_data:\n {hitran_data}") # Debugging
+    #print(f"hitran columns available:\n {list(hitran_data.items())[0][1].columns}") # debugging
 
     # Step 2: Compute predicted voltage for each light source
     predicted_voltages = []
@@ -155,17 +211,18 @@ if __name__ == "__main__":
     # Example light sources
     # Careful of the format that we need the wavelengths in
 
+    # TODO: There is going to be an error if we have empty dataframes. I.e. A lightsource range doesn't overlap with a chemicals line-by-line data.
     light_sources = [
         {
             'name': 'Light Source 1',
-            'wavelengths': torch.linspace(4500, 5000, 500),  # Wavelength range in nm
+            'wavelengths': torch.linspace(3.000, 3.500, 500),  # Wavelength range in microns
             'intensity': torch.ones(500),  # Placeholder: Uniform intensity
             'threshold': 1e-20,
             'buffers': 5
         },
         {
             'name': 'Light Source 2',
-            'wavelengths': torch.linspace(4000, 4500, 500),  # Wavelength range in nm
+            'wavelengths': torch.linspace(4.000, 4.500, 500),  # Wavelength range in microns
             'intensity': torch.ones(500),  # Placeholder: Uniform intensity
             'threshold': 1e-20,
             'buffers': 5
@@ -180,3 +237,4 @@ if __name__ == "__main__":
 
     # Output the combined error
     print("Combined error across light sources:", error)
+
