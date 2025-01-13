@@ -136,7 +136,7 @@ def parse_hitran(file_base, wavenumber_ranges, intensity_threshold=1e-20, buffer
     Parses and preprocesses HITRAN .data and .header files
 
     :param file_base: (str) Base path to the HITRAN file pair (e.g. "C2H2")
-    :param wavenumber_range: (tuple) (min_wavenumber, max_wavenumber) in cm^-1
+    :param wavenumber_range: (list of tuples) [(min_wavenumber, max_wavenumber)] in cm^-1
     :param intensity_threshold: (float) Minimum line intensity to include
     :param buffer: (float) Extra range to account for line broadening
 
@@ -171,8 +171,8 @@ def wavelength_to_wavenumber(wavelength_ranges):
 
 if __name__ == '__main__':
     # Example Usage
-    file_base = '../../data/HITRAN/C2H2' # If running it from the project folder the file base is likely './data/HITRAN/C2H2'
-    light_source_emission = [(15, 18), (20, 25)] # light source with 15 to 18 nm and 20 to 25 for optical 3 dB Bandwidth
+    file_base = '../../data/HITRAN/CO2' # If running it from the project folder the file base is likely './data/HITRAN/C2H2'
+    light_source_emission = [(2.5, 3.0), (4.0, 4.5)] # light source with 15 to 18 nm and 20 to 25 for optical 3 dB Bandwidth
     wavenumber_range = wavelength_to_wavenumber(light_source_emission)
     intensity_threshold = 1e-20 # Example intensity threshold
     buffers = 50 # buffer of 50 cm^-1
@@ -183,6 +183,7 @@ if __name__ == '__main__':
         print("Filtered Data:")
         print(filtered_data.columns)
         print(filtered_data.head()) # Display dataframe
+        print(f"dataframe shape: {filtered_data.shape}")
     except Exception as e:
         print(f"An error occurred: {e}")
         traceback.print_exc()
