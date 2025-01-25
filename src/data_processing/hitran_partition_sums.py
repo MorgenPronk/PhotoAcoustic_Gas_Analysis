@@ -12,7 +12,7 @@ Context:
 Features:
 1. Load partition sum data from HITRAN's TIPS dataset.
 2. Interpolate partition sums for arbitrary temperatures.
-3. Compute the partition function ratio ( Q(T_{\text{ref}})/Q(T) ) for temperature corrections.
+3. Compute the partition function ratio ( Q(T_ref)/Q(T) ) for temperature corrections.
 
 Dependencies:
 - Requires the HITRAN TIPS data (`QTpy` directory) available from the HITRAN online supplemental section.
@@ -22,8 +22,19 @@ Dependencies:
 import pickle
 import os
 from scipy.interpolate import interp1d
+from configparser import ConfigParser
+from src.utils import resolve_path
 
-def load_partition_sums(molecule_id, isotopologue_id, qtpy_dir='QTpy'):
+# Load configuration
+config = ConfigParser()
+config.read(resolve_path("config.ini"))
+
+# Resolve TIPS2021 directory
+TIPS2021_DIR = resolve_path(config["paths"]["TIPS2021_dir"])
+if not os.path.exists(TIPS2021_DIR):
+    raise FileNotFoundError(f"TIPS2021 directory not found: {TIPS2021_DIR}")
+
+def load_partition_sums(molecule_id, isotopologue_id, qtpy_dir=TIPS2021_DIR):
     """
     Load partition sums for a specific molecule and isotopologue from HITRAN TIPS data.
 
@@ -38,7 +49,6 @@ def load_partition_sums(molecule_id, isotopologue_id, qtpy_dir='QTpy'):
 
     with open(file_path, 'rb') as handle:
         return pickle.load(handle)
-
 
 def interpolate_partition_sum(qt_dict, temperature):
     """
@@ -56,8 +66,7 @@ def interpolate_partition_sum(qt_dict, temperature):
     interp_func = interp1d(temps, partition_sums, kind='linear', fill_value="extrapolate")
     return float(interp_func(temperature))
 
-
-def compute_partition_function_ratio(molecule_id, isotopologue_id, temperature, reference_temperature, qtpy_dir='QTpy'):
+def compute_partition_function_ratio(molecule_id, isotopologue_id, temperature, reference_temperature, qtpy_dir=TIPS2021_DIR):
     """
     Compute the partition function ratio Q(T_ref)/Q(T) for temperature corrections.
 
@@ -78,17 +87,16 @@ def compute_partition_function_ratio(molecule_id, isotopologue_id, temperature, 
     # Compute and return the ratio
     return q_t_ref / q_t
 
-# Example molecule and isotopologue IDs
 if __name__ == "__main__":
+    # Example molecule and isotopologue IDs
     molecule_id = '1'  # H2O
-    isotopologue_id = '8'  # H2O isotopologue
+    isotopologue_id = '161'  # Example isotopologue
 
     # Desired temperature and reference temperature
     temperature = 300.0  # Current temperature (K)
     reference_temperature = 296.0  # Reference temperature (K)
 
     # Compute the partition function ratio
-    qtpy_dir = '../../data/TIPS2021/QTpy'  # Directory containing partition sum data
-    q_ratio = compute_partition_function_ratio(molecule_id, isotopologue_id, temperature, reference_temperature, qtpy_dir)
+    q_ratio = compute_partition_function_ratio(molecule_id, isotopologue_id, temperature, reference_temperature)
 
     print(f"Partition function ratio Q({reference_temperature})/Q({temperature}): {q_ratio}")

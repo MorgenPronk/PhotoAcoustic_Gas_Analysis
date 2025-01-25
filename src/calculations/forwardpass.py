@@ -1,38 +1,51 @@
-## forwardpass.py
-
 import torch
-# import numpy as np
 import pandas as pd
-from src.data_processing.parse_hitran import *
+from configparser import ConfigParser
+import os
+from src.utils import resolve_path
+from src.data_processing.parse_hitran import parse_hitran, wavelength_to_wavenumber
 from src.data_processing.hitran_partition_sums import compute_partition_function_ratio
 
-# TODO: Light_source_range might be good if it could take wavelength values or wavenumber
-# TODO: Make it generic so it can get integrate with getting data from a database and not a file or directory
+
+# Debugging the path resolution
+print("Resolved path to config.ini:", resolve_path("config.ini"))
+
+# Load configuration
+config = ConfigParser()
+config.read(resolve_path("config.ini"))
+
+# Validate and resolve paths
+TIPS2021_DIR = resolve_path(config["paths"]["TIPS2021_dir"])
+HITRAN_DIR = resolve_path(config["paths"]["HITRAN_dir"])
+
+# Debugging the resolved paths
+print("Resolved TIPS2021_DIR:", TIPS2021_DIR)
+print("Resolved HITRAN_DIR:", HITRAN_DIR)
+
+if not os.path.exists(TIPS2021_DIR):
+    raise FileNotFoundError(f"TIPS2021 directory not found: {TIPS2021_DIR}")
+if not os.path.exists(HITRAN_DIR):
+    raise FileNotFoundError(f"HITRAN directory not found: {HITRAN_DIR}")
+
 def load_hitran_data(species, light_source_ranges, intensity_threshold=1e-20, buffers=5):
     """
-    Load HITRAN data for a given species based on light source parameters. Only loads areas near the light source for
-    efficiency.
+    Load HITRAN data for a given species based on light source parameters. Only loads areas near the light source for efficiency.
 
     :param species: Name of the species (e.g., 'CO2', 'CH4').
-    :param light_source_ranges: list of tuples specifying the ranges of the light sources. e.g (min, max).
-        **THIS IS CURRENTLY IN WAVELENGTH (microns)**
+    :param light_source_ranges: List of tuples specifying the ranges of the light sources. e.g., [(min, max)].
+        **This is expected to be in wavelengths (microns)**.
     :param intensity_threshold: Minimum line intensity to include.
     :param buffers: Extra range to account for line broadening.
     :return: pd.DataFrame with preprocessed HITRAN data for the species.
     """
-
-    # Parse and filter HITRAN data
     try:
-        file_base = f'../../data/HITRAN/{species}'  # If running it from the project folder the file base is likely './data/HITRAN/C2H2'
+        file_base = os.path.join(HITRAN_DIR, species)
         wavenumber_ranges = wavelength_to_wavenumber(light_source_ranges)
         filtered_data = parse_hitran(file_base, wavenumber_ranges, intensity_threshold, buffers)
         return filtered_data
     except Exception as e:
         print(f"An error occurred: {e}")
-        traceback.print_exc()
-
-
-from src.data_processing.hitran_partition_sums import compute_partition_function_ratio
+        raise
 
 def compute_absorptivity(hitran_data, concentrations, light_source, pressure=1.0, temperature=296, T_ref=296):
     """
@@ -53,7 +66,11 @@ def compute_absorptivity(hitran_data, concentrations, light_source, pressure=1.0
     absorptivity = torch.zeros_like(wavenumbers)
 
     for gas, data in hitran_data.items():
-        concentration = concentrations[gas]
+        # If no data is available in this region, the add zero absorptivitiy for the gas
+        if data.empty:
+            continue
+
+        concentration = concentrations.get(gas, 0.0) #If a gas doesn't have any contribution in this region then we will give it zero.
         try:
             # HITRAN columns
             nu = torch.tensor(data['nu'].values, dtype=torch.float32)  # Wavenumbers
@@ -72,7 +89,7 @@ def compute_absorptivity(hitran_data, concentrations, light_source, pressure=1.0
                 isotopologue_id=iso_id,
                 temperature=temperature,
                 reference_temperature=T_ref,
-                qtpy_dir='..\\..\\data\\TIPS2021\\QTpy'
+                qtpy_dir=TIPS2021_DIR
             )
 
             # Temperature correction for line intensity
@@ -95,9 +112,6 @@ def compute_absorptivity(hitran_data, concentrations, light_source, pressure=1.0
 
     return absorptivity
 
-
-
-
 def calculate_pressure_signal(absorptivity, light_source, environmental_params):
     """
     Placeholder: Calculate the pressure signal based on absorptivity.
@@ -107,9 +121,7 @@ def calculate_pressure_signal(absorptivity, light_source, environmental_params):
     :param environmental_params: Dict with environmental parameters (e.g., beta, rho, Cp).
     :return: torch.Tensor of pressure signal over time.
     """
-    # Placeholder: Use absorptivity to calculate the pressure signal
-    return torch.zeros(1)  # Single value or array for time-dependent signal
-
+    return torch.zeros(1)  # Placeholder for pressure signal calculation
 
 def voltage_from_pressure(pressure_signal, calibration_params):
     """
@@ -119,17 +131,16 @@ def voltage_from_pressure(pressure_signal, calibration_params):
     :param calibration_params: Dict with calibration parameters for microphone.
     :return: torch.Tensor of predicted microphone voltage.
     """
-    # Placeholder: Linear scaling for simplicity
     return calibration_params['sensitivity'] * pressure_signal
 
 def max_and_min(light_wavelengths):
     """
-    Takes the discrete data for lightsource wavelengths and gives the min and max values
+    Takes the discrete data for light source wavelengths and gives the min and max values.
 
-    :param light_wavelengths: torch.Tensor of wavelengths (1 x 2)
-    :return: tuple (max, min) of wavelengths
+    :param light_wavelengths: torch.Tensor of wavelengths (1 x 2).
+    :return: Tuple (min, max) of wavelengths.
     """
-    return (float(light_wavelengths.min()), float(light_wavelengths.max()))
+    return float(light_wavelengths.min()), float(light_wavelengths.max())
 
 def compute_total_error(predicted_voltages, measured_voltages):
     """
@@ -142,7 +153,6 @@ def compute_total_error(predicted_voltages, measured_voltages):
     predicted = torch.tensor(predicted_voltages)
     measured = torch.tensor(measured_voltages)
     return torch.linalg.norm(predicted - measured)
-
 
 def forward_pass(concentrations, gases, light_sources, measured_voltages, pressure=1.0, temperature=296):
     """
@@ -162,28 +172,10 @@ def forward_pass(concentrations, gases, light_sources, measured_voltages, pressu
         raise ValueError("Number of light sources must match the number of voltage measurements.")
 
     # Step 1: Load HITRAN data for each gas
-    # hitran_data is going to be structured like:
-    #  {"gas_formula": pd.DataFrame_filtered_data_join_of_lightsources, ... }
     hitran_data = {}
-    for i, gas in enumerate(gases):
-        try:
-            # For each gas, we need to find the data that overlaps with each lightsource
-            # light_source_ranges is going to be the list of min - max tuples that represent the range for each light
-            #  source. The parse_hitran() function used by load_hitran_data() expects a list of tuples anyways.
-            light_source_ranges = []
-            for light_source in light_sources:
-                wavenumber_min_max_tuple = max_and_min(light_source['wavelengths'])
-                light_source_ranges.append(wavenumber_min_max_tuple)
-            hitran_data[gas] = load_hitran_data(
-                gas, light_source_ranges,
-                light_sources[i]['threshold'],
-                light_sources[i]['buffers']
-            )
-        except Exception as e:
-            print(f"Error loading HITRAN data for gas {gas}: {e}")
-            continue
-    #print(f"hitran_data:\n {hitran_data}") # Debugging
-    #print(f"hitran columns available:\n {list(hitran_data.items())[0][1].columns}") # debugging
+    for gas in gases:
+        light_source_ranges = [max_and_min(ls['wavelengths']) for ls in light_sources]
+        hitran_data[gas] = load_hitran_data(gas, light_source_ranges)
 
     # Step 2: Compute predicted voltage for each light source
     predicted_voltages = []
@@ -194,47 +186,17 @@ def forward_pass(concentrations, gases, light_sources, measured_voltages, pressu
         predicted_voltages.append(predicted_voltage)
 
     # Step 3: Compute the combined error
-    error = compute_total_error(predicted_voltages, measured_voltages)
-    return error
+    return compute_total_error(predicted_voltages, measured_voltages)
 
-# Example usage
 if __name__ == "__main__":
-    # Example list of gases
+    # Example usage
     gases = ['CO2', 'CH4']
-
-    # Initial guess for concentrations (mol/L)
-    concentrations = {
-        'CO2': 0.01,  # Initial concentration of CO2
-        'CH4': 0.005,  # Initial concentration of CH4
-    }
-
-    # Example light sources
-    # Careful of the format that we need the wavelengths in
-
-    # TODO: There is going to be an error if we have empty dataframes. I.e. A lightsource range doesn't overlap with a chemicals line-by-line data.
+    concentrations = {'CO2': 0.01, 'CH4': 0.005}
     light_sources = [
-        {
-            'name': 'Light Source 1',
-            'wavelengths': torch.linspace(3.000, 3.500, 500),  # Wavelength range in microns
-            'intensity': torch.ones(500),  # Placeholder: Uniform intensity
-            'threshold': 1e-20,
-            'buffers': 5
-        },
-        {
-            'name': 'Light Source 2',
-            'wavelengths': torch.linspace(4.000, 4.500, 500),  # Wavelength range in microns
-            'intensity': torch.ones(500),  # Placeholder: Uniform intensity
-            'threshold': 1e-20,
-            'buffers': 5
-        },
+        {'name': 'Light Source 1', 'wavelengths': torch.linspace(3.0, 3.5, 500), 'intensity': torch.ones(500)},
+        {'name': 'Light Source 2', 'wavelengths': torch.linspace(4.0, 4.5, 500), 'intensity': torch.ones(500)}
     ]
+    measured_voltages = [0.1, 0.05]
 
-    # Example measured microphone voltages (one per light source)
-    measured_voltages = [0.1, 0.05]  # Placeholder: Simulated measurements
-
-    # Perform forward pass
     error = forward_pass(concentrations, gases, light_sources, measured_voltages)
-
-    # Output the combined error
     print("Combined error across light sources:", error)
-

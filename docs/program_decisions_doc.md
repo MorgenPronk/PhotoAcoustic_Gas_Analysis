@@ -135,6 +135,9 @@ For a mixture of gases, the total absorptivity is the sum of contributions from 
 4. **Pressure and Temperature Dependence of Broadening:**
    - Incorporate temperature and pressure dependence of \( \gamma_{\text{air}} \) and \( \gamma_{\text{self}} \).
 
+# Notes on laser
+potentially 30 nanometer difference with 40*C shift in temp
+
 ---
 
 ## References
